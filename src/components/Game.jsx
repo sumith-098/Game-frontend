@@ -17,7 +17,7 @@ const Game = ({ playerName, gameMode }) => {
   const [error, setError] = useState('');
   const [timeLeft, setTimeLeft] = useState('');
   const [isProcessing, setIsProcessing] = useState(false); // Prevent double clicks
-  const API_URL = 'http://localhost:8080/api/game';
+  const API_URL = 'https://game-uceq.onrender.com';
 
   // Poll for game updates - FAST polling (500ms)
   useEffect(() => {

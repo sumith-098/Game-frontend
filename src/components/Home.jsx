@@ -11,7 +11,7 @@ const Home = ({ playerName, setPlayerName, gameMode, setGameMode }) => {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
-  const API_URL = 'http://localhost:8080/api/game';
+  const API_URL = 'https://game-uceq.onrender.com';
 
   const handleCreateOrJoin = async (action) => {
     if (!playerName.trim()) {
