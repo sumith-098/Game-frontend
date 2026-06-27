@@ -21,7 +21,7 @@ const Game = ({ playerName, gameMode }) => {
   const SockJS = window.SockJS;
   const Stomp = window.Stomp;
   const API_URL1 = 'https://game-c2j9.onrender.com';
-  const API_URL = 'https://game-c2j9.onrender.com';
+  const API_URL = 'https://game-c2j9.onrender.com/api/game';
   
   // Use a ref to keep track of the stomp client across renders
   const stompClientRef = useRef(null);
