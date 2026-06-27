@@ -43,7 +43,7 @@ const Home = ({ playerName, setPlayerName, gameMode, setGameMode }) => {
         navigate(`/game/${response.data.roomId}`);
       }
     } catch (err) {
-      setError(err.response?.data || 'An error occurred. Please try again.');
+      setError( 'An error occurred. Please try again.');
     } finally {
       setLoading(false);
     }

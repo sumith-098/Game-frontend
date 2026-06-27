@@ -18,10 +18,8 @@ const Game = ({ playerName, gameMode }) => {
   const [error, setError] = useState('');
   const [timeLeft, setTimeLeft] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
-    
-
   const SockJS = window.SockJS;
-const Stomp = window.Stomp;
+  const Stomp = window.Stomp;
   const API_URL = 'https://game-c2j9.onrender.com';
   
   // Use a ref to keep track of the stomp client across renders
