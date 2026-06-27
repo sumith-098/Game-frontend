@@ -20,6 +20,7 @@ const Game = ({ playerName, gameMode }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const SockJS = window.SockJS;
   const Stomp = window.Stomp;
+  const API_URL1 = 'https://game-c2j9.onrender.com';
   const API_URL = 'https://game-c2j9.onrender.com';
   
   // Use a ref to keep track of the stomp client across renders
@@ -28,7 +29,7 @@ const Game = ({ playerName, gameMode }) => {
   // WebSocket Connection Lifecycle Management
   useEffect(() => {
     // 1. Initialize SockJS and Stomp connection
-    const socket = new SockJS(`${API_URL}/ws`);
+    const socket = new SockJS(`${API_URL1}/ws`);
     const stompClient = Stomp.over(socket);
     
     // Disable noisy console logs from Stomp framework

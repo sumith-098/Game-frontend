@@ -11,7 +11,7 @@ const Home = ({ playerName, setPlayerName, gameMode, setGameMode }) => {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
-  const API_URL = 'https://game-c2j9.onrender.com'
+  const API_URL = 'https://game-c2j9.onrender.com/game/api';
 
   const handleCreateOrJoin = async (action) => {
     if (!playerName.trim()) {
