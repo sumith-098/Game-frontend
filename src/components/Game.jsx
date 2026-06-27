@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { ArrowLeft, RotateCcw, Trophy, X, Circle, Clock } from 'lucide-react';
+
 import './Game.css';
 
 const Game = ({ playerName, gameMode }) => {
@@ -16,29 +17,63 @@ const Game = ({ playerName, gameMode }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [timeLeft, setTimeLeft] = useState('');
-  const [isProcessing, setIsProcessing] = useState(false); // Prevent double clicks
-  const API_URL = 'https://game-uceq.onrender.com';
-
-  // Poll for game updates - FAST polling (500ms)
-  useEffect(() => {
-    fetchGameState();
+  const [isProcessing, setIsProcessing] = useState(false);
     
-    // Check every 500ms for updates
-    const interval = setInterval(() => {
-      fetchGameState();
-    }, 500); // ← 0.5 seconds, much faster!
 
-    return () => clearInterval(interval);
+  const SockJS = window.SockJS;
+const Stomp = window.Stomp;
+  const API_URL = 'https://game-c2j9.onrender.com';
+  
+  // Use a ref to keep track of the stomp client across renders
+  const stompClientRef = useRef(null);
+
+  // WebSocket Connection Lifecycle Management
+  useEffect(() => {
+    // 1. Initialize SockJS and Stomp connection
+    const socket = new SockJS(`${API_URL}/ws`);
+    const stompClient = Stomp.over(socket);
+    
+    // Disable noisy console logs from Stomp framework
+    stompClient.debug = null; 
+
+    stompClient.connect({}, () => {
+      console.log('Connected to WebSocket server successfully!');
+      stompClientRef.current = stompClient;
+
+      // 2. Subscribe to your specific game topic matching your Spring Boot backend
+      stompClient.subscribe(`/topic/game/${roomId}`, (message) => {
+        if (message.body) {
+          const updatedGame = JSON.parse(message.body);
+          updateGameState(updatedGame);
+        }
+      });
+
+      // 3. Fetch initial game state once via REST API just to populate the UI initially
+      fetchInitialGameState();
+    }, (err) => {
+      console.error('WebSocket connection error:', err);
+      setError('Connection to server lost. Retrying...');
+    });
+
+    // 4. Cleanup function to safely disconnect when leaving the page
+    return () => {
+      if (stompClientRef.current && stompClientRef.current.connected) {
+        stompClientRef.current.disconnect(() => {
+          console.log('Disconnected from WebSocket safely.');
+        });
+      }
+    };
   }, [roomId]);
 
-  const fetchGameState = async () => {
+  const fetchInitialGameState = async () => {
     try {
       const response = await axios.get(`${API_URL}/${roomId}`);
       if (response.data) {
         updateGameState(response.data);
       }
     } catch (err) {
-      console.error('Error fetching game:', err);
+      console.error('Error fetching initial game state:', err);
+      setLoading(false);
     }
   };
 
@@ -60,30 +95,18 @@ const Game = ({ playerName, gameMode }) => {
       setIsMyTurn(updatedGame.currentTurn === 'O' && updatedGame.gameStatus === 'IN_PROGRESS');
     }
 
-    if (updatedGame.gameMode === 'PRIVATE' && updatedGame.expiresAt) {
-      const expiry = new Date(updatedGame.expiresAt);
-      const now = new Date();
-      const diff = Math.max(0, Math.floor((expiry - now) / 60000));
-      if (diff > 0) {
-        setTimeLeft(`${diff}m`);
-      } else {
-        setTimeLeft('Expired');
-      }
-    }
-
     setLoading(false);
     setIsProcessing(false);
   };
 
   const handleCellClick = async (index) => {
-    // Prevent multiple clicks
     if (isProcessing || !isMyTurn || gameStatus !== 'IN_PROGRESS' || board[index] !== ' ') {
       return;
     }
 
     setIsProcessing(true);
 
-    // OPTIMISTIC UPDATE: Update UI immediately for instant feel
+    // Optimistic UI update for instantaneous visual feedback
     const optimisticBoard = [...board];
     optimisticBoard[index] = mySymbol;
     setBoard(optimisticBoard);
@@ -96,20 +119,20 @@ const Game = ({ playerName, gameMode }) => {
         position: index
       };
 
-      const response = await axios.post(`${API_URL}/move`, move);
-      if (response.data) {
-        // Server confirms - update with server state
-        updateGameState(response.data);
-      }
+      // Send the move via your existing HTTP endpoint. 
+      // Your backend will handle the database save and broadcast the new layout to everyone over WebSockets automatically.
+      await axios.post(`${API_URL}/move`, move);
     } catch (err) {
-      // Error occurred - revert to server state
       console.error('Error making move:', err);
-      fetchGameState(); // Revert to correct server state
+      fetchInitialGameState(); // Revert back to proper server state on failure
       setError(err.response?.data || 'Failed to make move');
       setTimeout(() => setError(''), 3000);
       setIsProcessing(false);
     }
   };
+
+  // Keep the rest of your UI rendering code unchanged (checkWinningMove, renderCell, return JSX, etc.)
+
 
   const checkWinningMove = (index) => {
     if (!game?.boardState) return false;
