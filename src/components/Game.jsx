@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { ArrowLeft, RotateCcw, Trophy, X, Circle, Clock } from 'lucide-react';
-
+import { ArrowLeft, RotateCcw, Trophy, X, Circle, Clock, Send } from 'lucide-react';
 import './Game.css';
 
 const Game = ({ playerName, gameMode }) => {
@@ -18,28 +17,68 @@ const Game = ({ playerName, gameMode }) => {
   const [error, setError] = useState('');
   const [timeLeft, setTimeLeft] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [messages, setMessages] = useState([]);
+  const [typedMessage, setTypedMessage] = useState('');
+  
   const SockJS = window.SockJS;
   const Stomp = window.Stomp;
   const API_URL1 = 'https://game-c2j9.onrender.com';
   const API_URL = 'https://game-c2j9.onrender.com/api/game';
   
-  // Use a ref to keep track of the stomp client across renders
   const stompClientRef = useRef(null);
+  const chatStompClient = useRef(null);
+  const messagesEndRef = useRef(null);
 
-  // WebSocket Connection Lifecycle Management
+  // Auto-scroll to bottom of messages
   useEffect(() => {
-    // 1. Initialize SockJS and Stomp connection
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  // Chat WebSocket Connection
+  useEffect(() => {
+    const CHAT_SERVICE_URL = 'https://game-chat-service.onrender.com/chat-websocket'; 
+    const socket = new SockJS(CHAT_SERVICE_URL);
+    chatStompClient.current = Stomp.over(socket);
+    chatStompClient.current.debug = null;
+
+    chatStompClient.current.connect({}, () => {
+      chatStompClient.current.subscribe(`/topic/messages/${roomId}`, (response) => {
+        const receivedMessage = JSON.parse(response.body);
+        setMessages((prev) => [...prev, receivedMessage]);
+      });
+    }, (error) => {
+      console.error("Chat WebSocket Error: ", error);
+    });
+
+    return () => {
+      if (chatStompClient.current) chatStompClient.current.disconnect();
+    };
+  }, [roomId]);
+
+  const handleSendMessage = (e) => {
+    e.preventDefault();
+    if (!typedMessage.trim() || !chatStompClient.current) return;
+
+    const messagePayload = {
+      sender: playerName,
+      content: typedMessage.trim(),
+      roomId: roomId
+    };
+
+    chatStompClient.current.send(`/app/chat/${roomId}`, {}, JSON.stringify(messagePayload));
+    setTypedMessage('');
+  };
+
+  // Game WebSocket Connection
+  useEffect(() => {
     const socket = new SockJS(`${API_URL1}/ws`);
     const stompClient = Stomp.over(socket);
-    
-    // Disable noisy console logs from Stomp framework
     stompClient.debug = null; 
 
     stompClient.connect({}, () => {
       console.log('Connected to WebSocket server successfully!');
       stompClientRef.current = stompClient;
 
-      // 2. Subscribe to your specific game topic matching your Spring Boot backend
       stompClient.subscribe(`/topic/game/${roomId}`, (message) => {
         if (message.body) {
           const updatedGame = JSON.parse(message.body);
@@ -47,14 +86,12 @@ const Game = ({ playerName, gameMode }) => {
         }
       });
 
-      // 3. Fetch initial game state once via REST API just to populate the UI initially
       fetchInitialGameState();
     }, (err) => {
       console.error('WebSocket connection error:', err);
       setError('Connection to server lost. Retrying...');
     });
 
-    // 4. Cleanup function to safely disconnect when leaving the page
     return () => {
       if (stompClientRef.current && stompClientRef.current.connected) {
         stompClientRef.current.disconnect(() => {
@@ -105,7 +142,6 @@ const Game = ({ playerName, gameMode }) => {
 
     setIsProcessing(true);
 
-    // Optimistic UI update for instantaneous visual feedback
     const optimisticBoard = [...board];
     optimisticBoard[index] = mySymbol;
     setBoard(optimisticBoard);
@@ -118,20 +154,15 @@ const Game = ({ playerName, gameMode }) => {
         position: index
       };
 
-      // Send the move via your existing HTTP endpoint. 
-      // Your backend will handle the database save and broadcast the new layout to everyone over WebSockets automatically.
       await axios.post(`${API_URL}/move`, move);
     } catch (err) {
       console.error('Error making move:', err);
-      fetchInitialGameState(); // Revert back to proper server state on failure
+      fetchInitialGameState();
       setError(err.response?.data || 'Failed to make move');
       setTimeout(() => setError(''), 3000);
       setIsProcessing(false);
     }
   };
-
-  // Keep the rest of your UI rendering code unchanged (checkWinningMove, renderCell, return JSX, etc.)
-
 
   const checkWinningMove = (index) => {
     if (!game?.boardState) return false;
@@ -232,102 +263,149 @@ const Game = ({ playerName, gameMode }) => {
   }
 
   return (
-    <div className="game-container">
-      <div className="game-card glass-effect">
-        {/* Header */}
-        <div className="game-header">
-          <button onClick={handleLeave} className="back-btn">
-            <ArrowLeft size={20} />
-          </button>
-          
-          <div className="game-title">
-            <h2>Tic-Tac-Toe</h2>
-            <p>Room: {roomId}</p>
-          </div>
-          
-          {gameMode === 'PRIVATE' && timeLeft && (
-            <div className="timer">
-              <Clock size={16} />
-              <span>{timeLeft}</span>
-            </div>
-          )}
-        </div>
-
-        {/* Players Info */}
-        <div className="players-info">
-          <div className="player player-x">
-            <div className="player-avatar x-avatar">
-              <span>X</span>
-            </div>
-            <span className="player-name">{game?.player1 || 'Waiting...'}</span>
-            {game?.player1 === playerName && (
-              <span className="you-badge">(You)</span>
-            )}
-          </div>
-          
-          <span className="vs-text">vs</span>
-          
-          <div className="player player-o">
-            <div className="player-avatar o-avatar">
-              <span>O</span>
-            </div>
-            <span className="player-name">{game?.player2 || 'Waiting...'}</span>
-            {game?.player2 === playerName && (
-              <span className="you-badge">(You)</span>
-            )}
-          </div>
-        </div>
-
-        {/* Game Status */}
-        <div className="game-status">
-          <div className={`status-text ${isMyTurn ? 'my-turn' : 'opponent-turn'}`}>
-            {getStatusMessage()}
-          </div>
-          {isMyTurn && gameStatus === 'IN_PROGRESS' && (
-            <div className="turn-indicator">
-              You are playing as <strong>{mySymbol}</strong>
-            </div>
-          )}
-          {gameStatus === 'WAITING' && (
-            <div className="turn-indicator" style={{ color: '#fbbf24' }}>
-              Waiting for another player to join...
-            </div>
-          )}
-        </div>
-
-        {/* Game Board */}
-        <div className="game-board">
-          {board.map((_, index) => renderCell(index))}
-        </div>
-
-        {/* Actions */}
-        <div className="game-actions">
-          <button onClick={handleLeave} className="btn-secondary">
-            <ArrowLeft size={16} />
-            Leave
-          </button>
-          
-          {(gameStatus === 'COMPLETED' || winner) && (
-            <button onClick={handlePlayAgain} className="btn-primary">
-              <RotateCcw size={16} />
-              Play Again
+    <div className="game-layout">
+      {/* Game Board Section */}
+      <div className="game-board-section">
+        <div className="game-card glass-effect">
+          {/* Header */}
+          <div className="game-header">
+            <button onClick={handleLeave} className="back-btn">
+              <ArrowLeft size={20} />
             </button>
+            
+            <div className="game-title">
+              <h2>Tic-Tac-Toe</h2>
+              <p>Room: {roomId}</p>
+            </div>
+            
+            {gameMode === 'PRIVATE' && timeLeft && (
+              <div className="timer">
+                <Clock size={16} />
+                <span>{timeLeft}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Players Info */}
+          <div className="players-info">
+            <div className="player player-x">
+              <div className="player-avatar x-avatar">
+                <span>X</span>
+              </div>
+              <span className="player-name">{game?.player1 || 'Waiting...'}</span>
+              {game?.player1 === playerName && (
+                <span className="you-badge">(You)</span>
+              )}
+            </div>
+            
+            <span className="vs-text">vs</span>
+            
+            <div className="player player-o">
+              <div className="player-avatar o-avatar">
+                <span>O</span>
+              </div>
+              <span className="player-name">{game?.player2 || 'Waiting...'}</span>
+              {game?.player2 === playerName && (
+                <span className="you-badge">(You)</span>
+              )}
+            </div>
+          </div>
+
+          {/* Game Status */}
+          <div className="game-status">
+            <div className={`status-text ${isMyTurn ? 'my-turn' : 'opponent-turn'}`}>
+              {getStatusMessage()}
+            </div>
+            {isMyTurn && gameStatus === 'IN_PROGRESS' && (
+              <div className="turn-indicator">
+                You are playing as <strong>{mySymbol}</strong>
+              </div>
+            )}
+            {gameStatus === 'WAITING' && (
+              <div className="turn-indicator" style={{ color: '#fbbf24' }}>
+                Waiting for another player to join...
+              </div>
+            )}
+          </div>
+              
+          {/* Game Board */}
+          <div className="game-board">
+            {board.map((_, index) => renderCell(index))}
+          </div>
+
+          {/* Actions */}
+          <div className="game-actions">
+            <button onClick={handleLeave} className="btn-secondary">
+              <ArrowLeft size={16} />
+              Leave
+            </button>
+            
+            {(gameStatus === 'COMPLETED' || winner) && (
+              <button onClick={handlePlayAgain} className="btn-primary">
+                <RotateCcw size={16} />
+                Play Again
+              </button>
+            )}
+          </div>
+
+          {/* Winner Celebration */}
+          {winner && winner !== 'DRAW' && (
+            <div className="winner-celebration">
+              <Trophy size={32} color="#fbbf24" />
+              <span>{winner === playerName ? 'You Win!' : `${winner} Wins!`}</span>
+            </div>
+          )}
+          
+          {winner === 'DRAW' && (
+            <div className="draw-message">
+              🤝 It's a draw! Great game!
+            </div>
           )}
         </div>
+      </div>
 
-        {/* Winner Celebration */}
-        {winner && winner !== 'DRAW' && (
-          <div className="winner-celebration">
-            <Trophy size={32} color="#fbbf24" />
-            <span>{winner === playerName ? 'You Win!' : `${winner} Wins!`}</span>
-          </div>
-        )}
+      {/* Chat Panel */}
+      <div className="chat-side-panel glass-effect">
+        <div className="chat-header">
+          <h3>💬 Chat</h3>
+          <span className="chat-room">{roomId}</span>
+        </div>
         
-        {winner === 'DRAW' && (
-          <div className="draw-message">
-            🤝 It's a draw! Great game!
-          </div>
-        )}
+        <div className="chat-messages-box">
+          {messages.length === 0 ? (
+            <div className="chat-empty">
+              <p>No messages yet. Start the conversation!</p>
+            </div>
+          ) : (
+            messages.map((msg, index) => (
+              <div 
+                key={index} 
+                className={`chat-bubble ${msg.sender === playerName ? 'own' : 'other'}`}
+              >
+                <div className="chat-bubble-sender">
+                  <strong>{msg.sender}</strong>
+                </div>
+                <div className="chat-bubble-content">
+                  {msg.content}
+                </div>
+              </div>
+            ))
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+        
+        <form onSubmit={handleSendMessage} className="chat-input-bar">
+          <input 
+            type="text" 
+            value={typedMessage} 
+            onChange={(e) => setTypedMessage(e.target.value)} 
+            placeholder="Type a message..." 
+            className="chat-input"
+          />
+          <button type="submit" className="chat-send-btn">
+            <Send size={18} />
+          </button>
+        </form>
       </div>
     </div>
   );

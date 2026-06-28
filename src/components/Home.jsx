@@ -15,8 +15,19 @@ const Home = ({ playerName, setPlayerName, gameMode, setGameMode }) => {
   const timerRef = useRef(null);
   const navigate = useNavigate();
 
-  const API_URL = 'https://game-c2j9.onrender.com/api/game';
+  const GAME_API_URL = 'https://game-c2j9.onrender.com/api/game';
 
+  const CHAT_API_URL="https://game-chat-service.onrender.com"
+
+
+
+   useEffect(() => {
+    console.log("Sending pre-emptive wake-up pings to both microservices...");
+    
+    // Fire and forget: We run these asynchronously so they don't block the user interface
+    axios.get(`${GAME_API_URL}/health`).catch(() => {/* Ignore initial sleep errors */});
+    axios.get(`${CHAT_API_URL}/health`).catch(() => {/* Ignore initial sleep errors */});
+  }, []);
   // Dynamic messages to keep the user engaged during the Render cold start
   useEffect(() => {
     if (!loading) return;
