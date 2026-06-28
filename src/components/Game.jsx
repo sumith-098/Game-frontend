@@ -19,14 +19,15 @@ const Game = ({ playerName, gameMode }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [messages, setMessages] = useState([]);
   const [typedMessage, setTypedMessage] = useState('');
-  
+  const [chatConnected, setChatConnected] = useState(false);
+
   const SockJS = window.SockJS;
   const Stomp = window.Stomp;
   const API_URL1 = 'https://game-c2j9.onrender.com';
   const API_URL = 'https://game-c2j9.onrender.com/api/game';
   
   const stompClientRef = useRef(null);
-  const chatStompClient = useRef(null);
+  const chatStompClientRef = useRef(null);
   const messagesEndRef = useRef(null);
 
   // Auto-scroll to bottom of messages
@@ -34,69 +35,102 @@ const Game = ({ playerName, gameMode }) => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Chat WebSocket Connection
+  // ===== CHAT WEBSOCKET CONNECTION =====
   useEffect(() => {
-    const CHAT_SERVICE_URL = 'https://game-chat-service.onrender.com/chat-websocket'; 
-    const socket = new SockJS(CHAT_SERVICE_URL);
-    chatStompClient.current = Stomp.over(socket);
-    chatStompClient.current.debug = null;
+    if (!roomId || !playerName) return;
 
-    chatStompClient.current.connect({}, () => {
-      chatStompClient.current.subscribe(`/topic/messages/${roomId}`, (response) => {
-        const receivedMessage = JSON.parse(response.body);
-        setMessages((prev) => [...prev, receivedMessage]);
+    console.log('🔵 Connecting to chat service...');
+    
+    const CHAT_SERVICE_URL = 'https://game-chat-service.onrender.com/chat-websocket';
+    
+    try {
+      const socket = new SockJS(CHAT_SERVICE_URL);
+      const stompClient = Stomp.over(socket);
+      stompClient.debug = null;
+
+      stompClient.connect({}, () => {
+        console.log('✅ Chat WebSocket Connected!');
+        setChatConnected(true);
+        chatStompClientRef.current = stompClient;
+
+        // Subscribe to room messages
+        stompClient.subscribe(`/topic/messages/${roomId}`, (response) => {
+          console.log('📩 Chat message received:', response.body);
+          try {
+            const receivedMessage = JSON.parse(response.body);
+            setMessages((prev) => [...prev, receivedMessage]);
+          } catch (e) {
+            console.error('Error parsing chat message:', e);
+          }
+        });
+
+        // Send join notification
+        const joinMessage = {
+          sender: 'System',
+          content: `${playerName} joined the chat`,
+          roomId: roomId
+        };
+        stompClient.send(`/app/chat/${roomId}`, {}, JSON.stringify(joinMessage));
+        
+      }, (error) => {
+        console.error('❌ Chat WebSocket Error:', error);
+        setChatConnected(false);
       });
-    }, (error) => {
-      console.error("Chat WebSocket Error: ", error);
-    });
+
+    } catch (err) {
+      console.error('❌ Chat connection error:', err);
+      setChatConnected(false);
+    }
 
     return () => {
-      if (chatStompClient.current) chatStompClient.current.disconnect();
+      if (chatStompClientRef.current && chatStompClientRef.current.connected) {
+        chatStompClientRef.current.disconnect();
+        console.log('Chat WebSocket disconnected');
+      }
     };
-  }, [roomId]);
+  }, [roomId, playerName]);
 
-  const handleSendMessage = (e) => {
-    e.preventDefault();
-    if (!typedMessage.trim() || !chatStompClient.current) return;
-
-    const messagePayload = {
-      sender: playerName,
-      content: typedMessage.trim(),
-      roomId: roomId
-    };
-
-    chatStompClient.current.send(`/app/chat/${roomId}`, {}, JSON.stringify(messagePayload));
-    setTypedMessage('');
-  };
-
-  // Game WebSocket Connection
+  // ===== GAME WEBSOCKET CONNECTION =====
   useEffect(() => {
-    const socket = new SockJS(`${API_URL1}/ws`);
-    const stompClient = Stomp.over(socket);
-    stompClient.debug = null; 
+    if (!roomId) return;
 
-    stompClient.connect({}, () => {
-      console.log('Connected to WebSocket server successfully!');
-      stompClientRef.current = stompClient;
+    console.log('🔵 Connecting to game service...');
+    
+    try {
+      const socket = new SockJS(`${API_URL1}/ws`);
+      const stompClient = Stomp.over(socket);
+      stompClient.debug = null; 
 
-      stompClient.subscribe(`/topic/game/${roomId}`, (message) => {
-        if (message.body) {
-          const updatedGame = JSON.parse(message.body);
-          updateGameState(updatedGame);
-        }
+      stompClient.connect({}, () => {
+        console.log('✅ Game WebSocket Connected!');
+        stompClientRef.current = stompClient;
+
+        stompClient.subscribe(`/topic/game/${roomId}`, (message) => {
+          if (message.body) {
+            try {
+              const updatedGame = JSON.parse(message.body);
+              console.log('📩 Game update received:', updatedGame);
+              updateGameState(updatedGame);
+            } catch (e) {
+              console.error('Error parsing game message:', e);
+            }
+          }
+        });
+
+        fetchInitialGameState();
+      }, (err) => {
+        console.error('❌ Game WebSocket error:', err);
+        setError('Connection to server lost. Retrying...');
       });
 
-      fetchInitialGameState();
-    }, (err) => {
-      console.error('WebSocket connection error:', err);
-      setError('Connection to server lost. Retrying...');
-    });
+    } catch (err) {
+      console.error('❌ Game connection error:', err);
+    }
 
     return () => {
       if (stompClientRef.current && stompClientRef.current.connected) {
-        stompClientRef.current.disconnect(() => {
-          console.log('Disconnected from WebSocket safely.');
-        });
+        stompClientRef.current.disconnect();
+        console.log('Game WebSocket disconnected');
       }
     };
   }, [roomId]);
@@ -133,6 +167,51 @@ const Game = ({ playerName, gameMode }) => {
 
     setLoading(false);
     setIsProcessing(false);
+  };
+
+  // ===== SEND CHAT MESSAGE =====
+  const handleSendMessage = (e) => {
+    e.preventDefault();
+    
+    if (!typedMessage.trim()) {
+      console.log('Empty message, ignoring');
+      return;
+    }
+
+    if (!chatStompClientRef.current || !chatStompClientRef.current.connected) {
+      console.log('❌ Chat not connected, cannot send message');
+      setError('Chat not connected. Please wait...');
+      setTimeout(() => setError(''), 3000);
+      return;
+    }
+
+    const messagePayload = {
+      sender: playerName,
+      content: typedMessage.trim(),
+      roomId: roomId,
+      timestamp: new Date().toISOString()
+    };
+
+    console.log('📤 Sending chat message:', messagePayload);
+
+    try {
+      // Send to chat service
+      chatStompClientRef.current.send(
+        `/app/chat/${roomId}`, 
+        {}, 
+        JSON.stringify(messagePayload)
+      );
+      
+      // Optimistic update - show immediately
+      setMessages((prev) => [...prev, messagePayload]);
+      setTypedMessage('');
+      console.log('✅ Message sent successfully');
+      
+    } catch (err) {
+      console.error('❌ Error sending message:', err);
+      setError('Failed to send message');
+      setTimeout(() => setError(''), 3000);
+    }
   };
 
   const handleCellClick = async (index) => {
@@ -231,6 +310,12 @@ const Game = ({ playerName, gameMode }) => {
   };
 
   const handleLeave = () => {
+    if (stompClientRef.current && stompClientRef.current.connected) {
+      stompClientRef.current.disconnect();
+    }
+    if (chatStompClientRef.current && chatStompClientRef.current.connected) {
+      chatStompClientRef.current.disconnect();
+    }
     navigate('/');
   };
 
@@ -368,7 +453,12 @@ const Game = ({ playerName, gameMode }) => {
       <div className="chat-side-panel glass-effect">
         <div className="chat-header">
           <h3>💬 Chat</h3>
-          <span className="chat-room">{roomId}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span className="chat-room">{roomId}</span>
+            <span className={`chat-status ${chatConnected ? 'connected' : 'disconnected'}`}>
+              {chatConnected ? '🟢' : '🔴'}
+            </span>
+          </div>
         </div>
         
         <div className="chat-messages-box">
@@ -380,10 +470,15 @@ const Game = ({ playerName, gameMode }) => {
             messages.map((msg, index) => (
               <div 
                 key={index} 
-                className={`chat-bubble ${msg.sender === playerName ? 'own' : 'other'}`}
+                className={`chat-bubble ${msg.sender === playerName ? 'own' : msg.sender === 'System' ? 'system' : 'other'}`}
               >
                 <div className="chat-bubble-sender">
                   <strong>{msg.sender}</strong>
+                  {msg.timestamp && (
+                    <span className="chat-timestamp">
+                      {new Date(msg.timestamp).toLocaleTimeString()}
+                    </span>
+                  )}
                 </div>
                 <div className="chat-bubble-content">
                   {msg.content}
@@ -399,10 +494,11 @@ const Game = ({ playerName, gameMode }) => {
             type="text" 
             value={typedMessage} 
             onChange={(e) => setTypedMessage(e.target.value)} 
-            placeholder="Type a message..." 
+            placeholder={chatConnected ? "Type a message..." : "Connecting..."}
             className="chat-input"
+            disabled={!chatConnected}
           />
-          <button type="submit" className="chat-send-btn">
+          <button type="submit" className="chat-send-btn" disabled={!chatConnected}>
             <Send size={18} />
           </button>
         </form>
