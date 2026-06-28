@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { Users, Lock, Globe, Sparkles, ArrowRight, Gamepad2 } from 'lucide-react';
+import { Users, Lock, Globe, Sparkles, ArrowRight, Gamepad2, Loader2 } from 'lucide-react';
 import './Home.css';
 
 const Home = ({ playerName, setPlayerName, gameMode, setGameMode }) => {
@@ -9,9 +9,30 @@ const Home = ({ playerName, setPlayerName, gameMode, setGameMode }) => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [countdown, setCountdown] = useState(60);
+  const [loadingMessage, setLoadingMessage] = useState('Initializing server...');
+  
+  const timerRef = useRef(null);
   const navigate = useNavigate();
 
   const API_URL = 'https://game-c2j9.onrender.com/api/game';
+
+  // Dynamic messages to keep the user engaged during the Render cold start
+  useEffect(() => {
+    if (!loading) return;
+
+    if (countdown > 45) {
+      setLoadingMessage('Waking up the game server... Please wait.');
+    } else if (countdown > 30) {
+      setLoadingMessage('Spinning up environment... Almost there!');
+    } else if (countdown > 15) {
+      setLoadingMessage('Connecting to database... Hang tight!');
+    } else if (countdown > 0) {
+      setLoadingMessage('Finalizing connection... Just a few more seconds!');
+    } else {
+      setLoadingMessage('Still waiting... This usually takes up to 60s.');
+    }
+  }, [countdown, loading]);
 
   const handleCreateOrJoin = async (action) => {
     if (!playerName.trim()) {
@@ -26,6 +47,18 @@ const Home = ({ playerName, setPlayerName, gameMode, setGameMode }) => {
 
     setLoading(true);
     setError('');
+    setCountdown(60); // Reset timer to 60 seconds
+
+    // Start the countdown ticker
+    timerRef.current = setInterval(() => {
+      setCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(timerRef.current);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
 
     try {
       const request = {
@@ -40,14 +73,24 @@ const Home = ({ playerName, setPlayerName, gameMode, setGameMode }) => {
       const response = await axios.post(endpoint, request);
       
       if (response.data && response.data.roomId) {
+        clearInterval(timerRef.current);
         navigate(`/game/${response.data.roomId}`);
       }
     } catch (err) {
-      setError( 'An error occurred. Please try again.');
+      clearInterval(timerRef.current);
+      setError('An error occurred. Please try again.');
     } finally {
       setLoading(false);
+      clearInterval(timerRef.current);
     }
   };
+
+  // Clean up timer on unmount
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, []);
 
   const GameModeCard = ({ mode, icon: Icon, title, description }) => (
     <button
@@ -70,6 +113,21 @@ const Home = ({ playerName, setPlayerName, gameMode, setGameMode }) => {
 
   return (
     <div className="home-container">
+      {/* Loading Overlay Screen */}
+      {loading && (
+        <div className="loading-overlay">
+          <div className="loading-card glass-effect animate-fade-in">
+            <Loader2 className="spinner-icon" size={64} />
+            <div className="timer-circle">
+              <span className="timer-seconds">{countdown}s</span>
+            </div>
+            <h2>Connecting to Server</h2>
+            <p className="loading-subtext">{loadingMessage}</p>
+            <span className="server-notice">Free servers sleep after 15m of inactivity</span>
+          </div>
+        </div>
+      )}
+
       <div className="home-card glass-effect">
         {/* Header */}
         <div className="home-header">
@@ -153,7 +211,7 @@ const Home = ({ playerName, setPlayerName, gameMode, setGameMode }) => {
                 className="btn-primary create-btn"
               >
                 <Sparkles size={18} />
-                {loading ? 'Creating...' : 'Create Room'}
+                Create Room
               </button>
 
               <button
@@ -162,7 +220,7 @@ const Home = ({ playerName, setPlayerName, gameMode, setGameMode }) => {
                 className="btn-secondary join-btn"
               >
                 <Users size={18} />
-                {loading ? 'Joining...' : 'Join Room'}
+                Join Room
               </button>
             </div>
           </div>
@@ -176,7 +234,7 @@ const Home = ({ playerName, setPlayerName, gameMode, setGameMode }) => {
             className="btn-primary public-btn"
           >
             <Users size={20} />
-            {loading ? 'Finding Game...' : 'Find Public Game'}
+            Find Public Game
             <ArrowRight size={20} />
           </button>
         )}
